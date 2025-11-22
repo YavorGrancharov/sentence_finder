@@ -2,10 +2,10 @@ export interface SentenceFinderOptions {
   min_match_count?: number;
   case_sensitive?: boolean;
   tokenizer?: (text: string) => string[];
-  strict_tokens?: boolean; // When true, uses stricter tokenization
+  strict_tokens?: boolean;
 }
 
-type EventName = "init" | "search" | "suggest" | "merge" | "reset";
+type EventName = 'init' | 'search' | 'suggest' | 'merge' | 'reset';
 
 interface EventListenerMap {
   init: (count: number) => void;
@@ -19,9 +19,8 @@ export class SentenceFinder {
   private readonly dictionary: Map<string, number[]>;
   private readonly word_frequency: Map<string, number>;
   private collection: string[];
-  private match_count: Record<number, number>;
-  private index_map: Map<string, number>; // For O(1) lookups
-  private sorted_dictionary_cache: string[] | null = null; // Cache for sorted dictionary keys
+  private index_map: Map<string, number>;
+  private sorted_dictionary_cache: string[] | null = null;
 
   public min_match_count: number;
   public tokenizer: (text: string) => string[];
@@ -29,7 +28,7 @@ export class SentenceFinder {
   public events: { [K in EventName]: EventListenerMap[K][] };
 
   constructor({
-    min_match_count = 3,
+    min_match_count = 1,
     case_sensitive = false,
     tokenizer,
     strict_tokens = false,
@@ -37,7 +36,6 @@ export class SentenceFinder {
     this.dictionary = new Map();
     this.word_frequency = new Map();
     this.collection = [];
-    this.match_count = {};
     this.index_map = new Map();
     this.min_match_count = min_match_count;
     this.case_sensitive = case_sensitive;
@@ -48,74 +46,44 @@ export class SentenceFinder {
       merge: [],
       reset: [],
     };
-    this.tokenizer =
-      tokenizer ||
-      (strict_tokens ? this.strict_tokenizer : this.default_tokenizer);
+    this.tokenizer = tokenizer || (strict_tokens ? this.strict_tokenizer : this.default_tokenizer);
   }
 
-  /**
-   * Default tokenizer that splits on word boundaries and removes punctuation.
-   */
   private default_tokenizer = (text: string): string[] => {
     return text
       .split(/[^\p{L}\p{N}]+/u)
       .filter(Boolean)
-      .map((w) => w.toLowerCase());
+      .map((w) => (this.case_sensitive ? w : w.toLowerCase()));
   };
 
-  /**
-   * Strict tokenizer that preserves more text features for exact matching.
-   * - Preserves hyphenated words as single tokens
-   * - Keeps apostrophes in contractions
-   * - Removes other punctuation
-   * - Normalizes whitespace
-   */
   private strict_tokenizer = (text: string): string[] => {
-    return (
-      text
-        // Normalize whitespace
-        .replace(/\s+/g, " ")
-        // Split on boundaries but preserve hyphenated words and contractions
-        .split(
-          /(?<![\p{L}\p{N}'-])(?![\p{L}\p{N}'-])|(?<=[^\p{L}\p{N}'-])(?=[\p{L}\p{N}'-])/u
-        )
-        .map((token) => token.trim())
-        .filter(Boolean)
-        .map((w) => (this.case_sensitive ? w : w.toLowerCase()))
-    );
+    return text
+      .replace(/\s+/g, ' ')
+      .split(/(?<![\p{L}\p{N}'-])(?![\p{L}\p{N}'-])|(?<=[^\p{L}\p{N}'-])(?=[\p{L}\p{N}'-])/u)
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .map((w) => (this.case_sensitive ? w : w.toLowerCase()));
   };
 
   private normalize_word = (word: string): string => {
     return this.case_sensitive ? word : word.toLowerCase();
   };
 
-  public on = <K extends EventName>(
-    event: K,
-    listener: EventListenerMap[K]
-  ): this => {
+  public on = <K extends EventName>(event: K, listener: EventListenerMap[K]): this => {
     this.events[event].push(listener);
     return this;
   };
 
-  public emit = <K extends EventName>(
-    event: K,
-    ...args: Parameters<EventListenerMap[K]>
-  ): this => {
+  public emit = <K extends EventName>(event: K, ...args: Parameters<EventListenerMap[K]>): this => {
     const listeners = this.events[event];
     for (const listener of listeners) {
-      // Type assertion to handle the parameter spread safely
-      (listener as (...args: any[]) => void)(...args);
+      (listener as (...args: unknown[]) => void)(...args);
     }
     return this;
   };
 
-  /**
-   * Initializes the sentence finder with an array of strings.
-   * @param input Array of strings to index
-   * @returns this for method chaining
-   */
   public init = (input: string[]): this => {
-    if (!Array.isArray(input)) throw new Error("Input must be an array");
+    if (!Array.isArray(input)) throw new Error('Input must be an array');
 
     this.collection = [...input];
     this.dictionary.clear();
@@ -123,29 +91,21 @@ export class SentenceFinder {
     this.index_map.clear();
     this.sorted_dictionary_cache = null;
 
-    // Store sentence indexes for O(1) lookup
     for (let i = 0; i < input.length; i++) {
       this.index_map.set(input[i], i);
       const words = this.tokenizer(input[i]);
-      if (!words) continue;
-
-      for (let j = 0; j < words.length; j++) {
-        const key_word = this.normalize_word(words[j]);
-        if (this.dictionary.has(key_word)) {
-          const prev_indexes = this.dictionary.get(key_word)!;
-          this.dictionary.set(key_word, [...prev_indexes, i]);
-        } else {
-          this.dictionary.set(key_word, [i]);
+      for (const word of words) {
+        const key_word = this.normalize_word(word); // <-- normalize here
+        if (!this.dictionary.has(key_word)) {
+          this.dictionary.set(key_word, []);
         }
+        this.dictionary.get(key_word)!.push(i);
 
-        this.word_frequency.set(
-          key_word,
-          (this.word_frequency.get(key_word) || 0) + 1
-        );
+        this.word_frequency.set(key_word, (this.word_frequency.get(key_word) || 0) + 1);
       }
     }
 
-    this.emit("init", this.collection.length);
+    this.emit('init', this.collection.length);
     return this;
   };
 
@@ -163,51 +123,112 @@ export class SentenceFinder {
    */
   public search = (
     search_input: string,
-    options?: { ranked?: boolean; min_match_count?: number }
+    options?: { ranked?: boolean; min_match_count?: number; partial?: boolean },
   ): { results: string[]; finder: SentenceFinder } => {
     if (!search_input.trim()) return { results: [], finder: this };
 
-    // Reset match count for new search
-    this.match_count = {};
     const min_match = options?.min_match_count ?? this.min_match_count;
+    const tokens = this.tokenizer(search_input).map(this.normalize_word);
+    if (tokens.length === 0) return { results: [], finder: this };
 
-    const words = this.tokenizer(search_input);
-    if (!words) return { results: [], finder: this };
+    const sentence_matches: Map<number, Set<string>> = new Map();
+    const partial = options?.partial ?? false;
 
-    // Count matches for each sentence
-    for (let i = 0; i < words.length; i++) {
-      const key_word = this.normalize_word(words[i]);
-      if (this.dictionary.has(key_word)) {
-        const indexes = this.dictionary.get(key_word)!;
-        for (let j = 0; j < indexes.length; j++) {
-          const match_count_index = indexes[j];
-          this.match_count[match_count_index] =
-            (this.match_count[match_count_index] || 0) + 1;
+    for (const token of tokens) {
+      if (partial) {
+        for (const [dictWord, indexes] of this.dictionary.entries()) {
+          if (dictWord.includes(token)) {
+            for (const idx of indexes) {
+              if (!sentence_matches.has(idx)) sentence_matches.set(idx, new Set());
+              sentence_matches.get(idx)!.add(token);
+            }
+          }
+        }
+      } else {
+        // Exact match
+        if (this.dictionary.has(token)) {
+          for (const idx of this.dictionary.get(token)!) {
+            if (!sentence_matches.has(idx)) sentence_matches.set(idx, new Set());
+            sentence_matches.get(idx)!.add(token);
+          }
+        } else {
+          // Fallback: match words that start with the token (prefix match)
+          for (const [dictWord, indexes] of this.dictionary.entries()) {
+            if (dictWord.startsWith(token)) {
+              for (const idx of indexes) {
+                if (!sentence_matches.has(idx)) sentence_matches.set(idx, new Set());
+                sentence_matches.get(idx)!.add(token);
+              }
+            }
+          }
         }
       }
     }
 
-    const sentences: string[] = [];
-    for (const [word_index, word_count] of Object.entries(this.match_count)) {
-      if (word_count >= min_match) {
-        sentences.push(this.collection[Number(word_index)]);
-      }
+    // Filter sentences with matched tokens >= min_match
+    const results: string[] = [];
+    for (const [idx, tokensSet] of sentence_matches.entries()) {
+      if (tokensSet.size >= min_match) results.push(this.collection[idx]);
     }
 
+    // Rank results if needed
     if (options?.ranked) {
-      sentences.sort((a, b) => {
-        // Use index_map for O(1) lookup instead of indexOf
-        const a_index = this.index_map.get(a)!;
-        const b_index = this.index_map.get(b)!;
-        return (
-          (this.match_count[b_index] || 0) - (this.match_count[a_index] || 0)
-        );
+      // Compute a score per sentence: number of occurrences of the search tokens in the sentence
+      const scoreMap: Map<number, number> = new Map();
+      const earliestMatchMap: Map<number, number> = new Map();
+      for (const [idx] of sentence_matches.entries()) {
+        scoreMap.set(idx, 0);
+        earliestMatchMap.set(idx, Number.POSITIVE_INFINITY);
+      }
+      for (const token of tokens) {
+        for (const [idx] of sentence_matches.entries()) {
+          // Count occurrences of token as substring in the sentence tokens
+          const sentenceTokens = this.tokenizer(this.collection[idx]).map(this.normalize_word);
+          let occ = 0;
+          for (let tI = 0; tI < sentenceTokens.length; tI++) {
+            const st = sentenceTokens[tI];
+            let pos = 0;
+            let localOcc = 0;
+            while (true) {
+              const found = st.indexOf(token, pos);
+              if (found === -1) break;
+              // Weight exact matches higher than prefix/substring matches
+              if (st === token) {
+                localOcc += 10; // strong preference for exact word match
+              } else if (st.startsWith(token)) {
+                localOcc += 2; // prefix match
+              } else {
+                localOcc += 1; // substring match
+              }
+              pos = found + token.length;
+            }
+            if (localOcc > 0) {
+              occ += localOcc;
+              // record earliest match position
+              earliestMatchMap.set(idx, Math.min(earliestMatchMap.get(idx)!, tI));
+            }
+          }
+          scoreMap.set(idx, (scoreMap.get(idx) || 0) + occ);
+        }
+      }
+
+      results.sort((a, b) => {
+        const aIndex = this.index_map.get(a)!;
+        const bIndex = this.index_map.get(b)!;
+        const aScore = scoreMap.get(aIndex) ?? 0;
+        const bScore = scoreMap.get(bIndex) ?? 0;
+        if (bScore !== aScore) return bScore - aScore;
+        // Tie-breaker: prefer sentence where match appears earlier in token order
+        const aEarliest = earliestMatchMap.get(aIndex) ?? Number.POSITIVE_INFINITY;
+        const bEarliest = earliestMatchMap.get(bIndex) ?? Number.POSITIVE_INFINITY;
+        if (aEarliest !== bEarliest) return aEarliest - bEarliest;
+        // Final tie-breaker: lower original index first
+        return (this.index_map.get(a) ?? 0) - (this.index_map.get(b) ?? 0);
       });
     }
 
-    this.emit("search", sentences.length);
-
-    return { results: sentences, finder: this };
+    this.emit('search', results.length);
+    return { results, finder: this };
   };
 
   /**
@@ -221,7 +242,7 @@ export class SentenceFinder {
    */
   public searchArray = (
     search_input: string,
-    options?: { ranked?: boolean; min_match_count?: number }
+    options?: { ranked?: boolean; min_match_count?: number; partial?: boolean },
   ): string[] => {
     return this.search(search_input, options).results;
   };
@@ -237,9 +258,7 @@ export class SentenceFinder {
    * Performance note: First call may sort the dictionary, subsequent calls use a cached sorted array
    * until the dictionary is modified (via init, merge, or reset).
    */
-  public suggest = (
-    prefix: string
-  ): { suggestions: string[]; finder: SentenceFinder } => {
+  public suggest = (prefix: string): { suggestions: string[]; finder: SentenceFinder } => {
     if (!prefix.trim()) return { suggestions: [], finder: this };
 
     const norm_prefix = this.normalize_word(prefix);
@@ -265,15 +284,12 @@ export class SentenceFinder {
 
     // Collect all words that start with the prefix
     const suggestions: string[] = [];
-    while (
-      start < sorted_words.length &&
-      sorted_words[start].startsWith(norm_prefix)
-    ) {
+    while (start < sorted_words.length && sorted_words[start].startsWith(norm_prefix)) {
       suggestions.push(sorted_words[start]);
       start++;
     }
 
-    this.emit("suggest", suggestions.length);
+    this.emit('suggest', suggestions.length);
 
     return { suggestions, finder: this };
   };
@@ -301,77 +317,52 @@ export class SentenceFinder {
    * @param options.deduplicate Whether to remove duplicate sentences during merge
    * @returns this for method chaining
    */
-  public merge = (
-    finder: SentenceFinder,
-    options?: { deduplicate?: boolean }
-  ): this => {
+  public merge = (finder: SentenceFinder, options?: { deduplicate?: boolean }): this => {
     if (!(finder instanceof SentenceFinder)) {
-      throw new Error("Can only merge with another SentenceFinder instance");
+      throw new Error('Can only merge with another SentenceFinder instance');
     }
 
     const offset = this.collection.length;
-    const duplicates = new Set<number>(); // Track indexes of duplicates
-
-    // If deduplication is enabled, identify duplicates first
+    let newSentences: string[];
     if (options?.deduplicate) {
-      finder.collection.forEach((sentence, i) => {
-        if (this.index_map.has(sentence)) {
-          duplicates.add(i);
-        }
-      });
+      const existing = new Set(this.collection);
+      newSentences = finder.collection.filter((s) => !existing.has(s));
+    } else {
+      newSentences = finder.collection;
     }
 
-    // Update dictionary with new indexes, skipping duplicates
+    // Update dictionary and word frequencies
     for (const [word, indexes] of finder.dictionary.entries()) {
       const adjusted_indexes = indexes
-        .filter((idx) => !duplicates.has(idx))
-        .map((idx) => {
-          // Adjust index based on how many duplicates come before it
-          const precedingDuplicates = options?.deduplicate
-            ? Array.from(duplicates).filter((d) => d < idx).length
-            : 0;
-          return idx + offset - precedingDuplicates;
-        });
-
+        .filter((idx) => !options?.deduplicate || newSentences.includes(finder.collection[idx]))
+        .map((idx) => idx + offset);
       if (this.dictionary.has(word)) {
-        const existing_indexes = this.dictionary.get(word)!;
-        this.dictionary.set(word, [
-          ...new Set([...existing_indexes, ...adjusted_indexes]),
-        ]);
+        const existingIndexes = this.dictionary.get(word)!;
+        this.dictionary.set(word, [...new Set([...existingIndexes, ...adjusted_indexes])]);
       } else {
         this.dictionary.set(word, adjusted_indexes);
       }
     }
-
-    // Update word frequencies, accounting for duplicates
     for (const [word, freq] of finder.word_frequency.entries()) {
-      const duplicate_freq = options?.deduplicate
-        ? finder.collection
-            .filter((_, i) => duplicates.has(i))
-            .filter((s) => finder.tokenizer(s).includes(word)).length
-        : 0;
-
-      this.word_frequency.set(
-        word,
-        (this.word_frequency.get(word) || 0) + freq - duplicate_freq
-      );
+      let addFreq = 0;
+      if (options?.deduplicate) {
+        // Only count frequency for new sentences
+        for (const s of newSentences) {
+          const tokens = finder.tokenizer(s).map(this.normalize_word);
+          if (tokens.includes(word)) addFreq++;
+        }
+      } else {
+        addFreq = freq;
+      }
+      this.word_frequency.set(word, (this.word_frequency.get(word) || 0) + addFreq);
     }
-
-    // Update collection and index_map, skipping duplicates
-    const new_sentences = options?.deduplicate
-      ? finder.collection.filter((_, i) => !duplicates.has(i))
-      : finder.collection;
-
-    new_sentences.forEach((sentence, i) => {
+    // Update index_map and collection
+    newSentences.forEach((sentence, i) => {
       this.index_map.set(sentence, offset + i);
     });
-
-    this.collection = [...this.collection, ...new_sentences];
-
-    // Invalidate sorted dictionary cache since we've added new words
+    this.collection = [...this.collection, ...newSentences];
     this.sorted_dictionary_cache = null;
-
-    this.emit("merge", finder.collection.length);
+    this.emit('merge', finder.collection.length);
     return this;
   };
 
@@ -379,10 +370,9 @@ export class SentenceFinder {
     this.collection = [];
     this.dictionary.clear();
     this.word_frequency.clear();
-    this.match_count = {};
     this.index_map.clear();
     this.sorted_dictionary_cache = null;
-    this.emit("reset");
+    this.emit('reset');
     return this;
   }
 }

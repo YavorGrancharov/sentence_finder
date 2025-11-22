@@ -5,24 +5,20 @@ A high-performance TypeScript library for searching and managing collections of 
 ## Features
 
 - 🔍 **Smart Search**: Find sentences by word matches with configurable strictness
-- 📊 **Ranked Results**: Sort matches by relevance
-- ⚡ **High Performance**:
-  - O(1) lookups for ranked searches
-  - Binary search for prefix suggestions
-  - Cached sorting for repeated operations
-- 🎯 **Flexible Matching**:
-  - Case sensitivity toggle
-  - Strict or relaxed tokenization
-  - Custom tokenizer support
-- 🔄 **Collection Management**:
-  - Merge multiple collections
-  - Optional sentence deduplication
-  - Reset and reinitialize
-- 📈 **Analysis Tools**:
-  - Word frequency statistics
-  - Dictionary inspection
-  - Prefix-based suggestions
-- 🎮 **Event System**: Hooks for init, search, suggest, merge, and reset operations
+# SentenceFinder
+
+A high-performance TypeScript library for searching and managing collections of sentences. It supports ranked searches, prefix suggestions, partial/substring matching, merge/deduplication, word-frequency inspection and a small event API.
+
+## Highlights
+
+- Smart search with configurable matching behavior (exact, prefix fallback, partial/substring).
+- Ranked results that prefer exact word matches, then prefixes, then substrings; ties broken by earliest match position and original insertion order.
+- Fast prefix suggestions (binary search over a cached sorted dictionary).
+- Merge multiple finders with optional deduplication.
+- Expose internal dictionary and word frequency maps for analysis.
+- Small event system for `init`, `search`, `suggest`, `merge`, and `reset` events.
+
+---
 
 ## Installation
 
@@ -30,164 +26,170 @@ A high-performance TypeScript library for searching and managing collections of 
 npm install sentence-finder
 ```
 
-## Quick Start
+## Quick start
 
-```typescript
-import { SentenceFinder } from "sentence-finder";
+```ts
+import { SentenceFinder } from 'sentence-finder';
 
-// Initialize with default options
+// Create finder with defaults
 const finder = new SentenceFinder();
 
-// Add some sentences
-finder
-  .init([
-    "The quick brown fox jumps over the lazy dog",
-    "Quick foxes are known for jumping",
-    "Dogs are usually lazy in the afternoon",
-  ])
-  .on("search", (count) => console.log(`Found ${count} matches`));
-
-// Simple search
-const matches = finder.searchArray("fox jump");
-console.log(matches);
-// → ["The quick brown fox jumps over the lazy dog", "Quick foxes are known for jumping"]
-
-// Ranked search with chaining
-const { results, finder: f } = finder
-  .search("fox jump", { ranked: true })
-  .suggest("qu");
-
-console.log(results); // Ranked matching sentences
-console.log(suggestions); // Words starting with "qu"
-```
-
-## Advanced Usage
-
-### Configuration Options
-
-```typescript
-const finder = new SentenceFinder({
-  min_match_count: 2, // Minimum word matches required (default: 3)
-  case_sensitive: true, // Enable case-sensitive matching (default: false)
-  strict_tokens: true, // Use stricter tokenization (default: false)
-  tokenizer: customFn, // Provide custom tokenization function
-});
-```
-
-### Strict Tokenization
-
-The strict tokenizer preserves:
-
-- Hyphenated words ("hi-tech" stays as one token)
-- Contractions ("I'm" remains intact)
-- Better boundary handling
-
-```typescript
-const finder = new SentenceFinder({ strict_tokens: true });
-finder.init(["Hi-tech solutions", "High tech answers"]);
-
-finder.searchArray("hi-tech"); // Only matches "Hi-tech solutions"
-```
-
-### Merging Collections
-
-```typescript
-const mainFinder = new SentenceFinder().init(["Common sentence", "Unique one"]);
-const otherFinder = new SentenceFinder().init([
-  "Common sentence",
-  "Another unique",
+// Initialize with sentences
+finder.init([
+  'The quick brown fox jumps over the lazy dog',
+  'Quick foxes are known for jumping',
+  'Dogs are usually lazy in the afternoon',
 ]);
 
-// Merge with deduplication
-mainFinder.merge(otherFinder, { deduplicate: true });
+// Simple search (non-ranked)
+console.log(finder.searchArray('fox jump'));
+
+// Ranked search
+const { results } = finder.search('fox jump', { ranked: true });
+console.log(results);
 ```
 
-### Event Handling
+---
 
-```typescript
-finder
-  .on("init", (count) => console.log(`Initialized with ${count} sentences`))
-  .on("search", (count) => console.log(`Found ${count} matches`))
-  .on("suggest", (count) => console.log(`Found ${count} suggestions`))
-  .on("merge", (count) => console.log(`Merged ${count} new sentences`))
-  .on("reset", () => console.log("Finder reset"));
-```
+## Constructor options
 
-### Analysis Tools
-
-```typescript
-// Get word frequencies
-const frequencies = finder.getWordFrequency();
-console.log(frequencies.get("fox")); // → 2
-
-// Inspect word-to-sentence mapping
-const dictionary = finder.getDictionary();
-console.log(dictionary.get("quick")); // → [0, 1] (sentence indexes)
-
-// Get word suggestions
-const { suggestions } = finder.suggest("fo");
-console.log(suggestions); // → ["fox", "foxes"]
-```
-
-## API Reference
-
-### Constructor Options
-
-```typescript
+```ts
 interface SentenceFinderOptions {
-  min_match_count?: number; // Minimum word matches required
-  case_sensitive?: boolean; // Enable case sensitivity
-  tokenizer?: (text: string) => string[]; // Custom tokenizer
-  strict_tokens?: boolean; // Use strict tokenization
+  min_match_count?: number; // Minimum number of matched tokens required (default: 3)
+  case_sensitive?: boolean; // Whether token matching is case-sensitive (default: false)
+  tokenizer?: (text: string) => string[]; // Provide a custom tokenizer
+  strict_tokens?: boolean; // Use the built-in strict tokenizer (default: false)
 }
 ```
 
-### Methods
+Notes:
+- The default `min_match_count` is intentionally conservative (3) to avoid noisy single-word matches; set it to `1` for single-token searches or in tests/examples where appropriate.
+- `case_sensitive: false` (default) means tokens are normalized to lower-case before indexing and searching.
 
-#### Core Operations
+---
 
-- `init(sentences: string[]): this`
-- `search(text: string, options?: SearchOptions): { results: string[]; finder: SentenceFinder }`
-- `searchArray(text: string, options?: SearchOptions): string[]`
-- `suggest(prefix: string): { suggestions: string[]; finder: SentenceFinder }`
+## Tokenizers
 
-#### Collection Management
+- default tokenizer: splits on non-letter/non-number boundaries and (unless `case_sensitive` is true) lowercases tokens.
+- strict tokenizer: preserves hyphenated words and contractions better and trims extra spaces; it still respects the `case_sensitive` option when producing tokens.
+- custom tokenizer: pass a `(text: string) => string[]` to the constructor if you need special tokenization.
 
-- `merge(finder: SentenceFinder, options?: { deduplicate?: boolean }): this`
-- `reset(): this`
-
-#### Analysis
-
-- `getDictionary(): Map<string, number[]>`
-- `getWordFrequency(): Map<string, number>`
-
-#### Event Handling
-
-- `on(event: EventName, listener: EventListener): this`
-- `emit(event: EventName, ...args: any[]): this`
-
-### Types
-
-```typescript
-type EventName = "init" | "search" | "suggest" | "merge" | "reset";
-
-interface SearchOptions {
-  ranked?: boolean;
-  min_match_count?: number;
-}
+Example:
+```ts
+const finder = new SentenceFinder({ strict_tokens: true });
 ```
 
-## Performance Considerations
+---
 
-- `search` with `ranked: true` uses O(1) lookups instead of O(n)
-- `suggest` uses binary search and caches sorted words
-- `merge` with `deduplicate: true` has additional overhead
-- Large collections benefit from strict tokenization
+## Search
+
+API:
+```ts
+search(text: string, options?: { ranked?: boolean; min_match_count?: number; partial?: boolean }): { results: string[]; finder: SentenceFinder }
+searchArray(text: string, options?: { ranked?: boolean; min_match_count?: number; partial?: boolean }): string[]
+```
+
+Behavior:
+- Tokenizes the input text using the configured tokenizer and normalizes tokens (unless `case_sensitive`).
+- `partial: false` (default) performs exact word matching. If an exact token is not present in the dictionary, the search will fall back to prefix matching (dictionary words that start with the token).
+- `partial: true` performs substring matching across dictionary words.
+- Matches are counted per sentence; only sentences with at least `min_match_count` distinct token matches are returned.
+
+Ranking (when `ranked: true`):
+- A weighted score is computed per sentence based on occurrences of the search tokens inside the sentence tokens.
+- Preference order: exact word matches (strongest) > prefix matches > substring matches.
+- Ties are broken by earliest token position where a match appears in the sentence, then by original insertion order.
+
+Examples:
+```ts
+finder.searchArray('fox jump'); // non-ranked
+finder.search('fox jump', { ranked: true }); // ranked
+finder.search('irr', { partial: true }); // substring matches
+```
+
+---
+
+## Suggestions
+
+API:
+```ts
+suggest(prefix: string): { suggestions: string[]; finder: SentenceFinder }
+```
+
+- Returns dictionary words that start with the provided prefix.
+- Uses a cached sorted array of dictionary keys and binary search for fast lookups.
+- Cache is invalidated when the dictionary is modified (via `init`, `merge`, or `reset`).
+
+---
+
+## Merge and deduplication
+
+API:
+```ts
+merge(finder: SentenceFinder, options?: { deduplicate?: boolean }): this
+```
+
+- Merges another `SentenceFinder` instance into this one.
+- `deduplicate: true` will avoid adding duplicate sentences that already exist in the receiving finder.
+- When deduplicating the implementation ensures new sentences are added and their tokens are indexed; word frequency is updated accordingly for newly added sentences.
+
+Note: merging preserves the receiving finder's tokenizer/case-sensitivity configuration for how sentences are indexed after merge.
+
+---
+
+## Collection management
+
+- `init(sentences: string[]): this` — initialize or re-initialize the finder with a new collection. Clears previous indexes and caches.
+- `reset(): this` — clear collection, dictionary, frequencies and caches.
+
+---
+
+## Analysis helpers
+
+- `getDictionary(): Map<string, number[]>` — returns the internal mapping of token -> sentence index list.
+- `getWordFrequency(): Map<string, number>` — returns a map of token -> occurrence count across the collection.
+
+These are useful for debugging, exporting statistics, or building external visualizations.
+
+---
+
+## Events
+
+You can subscribe to lifecycle events using `on(event, listener)`:
+
+Supported events:
+- `init` — called after `init` completes with the number of sentences
+- `search` — called after each `search` with the number of results
+- `suggest` — called after each `suggest` with the number of suggestions
+- `merge` — called after `merge` with the number of sentences merged
+- `reset` — called after `reset`
+
+Example:
+```ts
+finder.on('search', count => console.log(`Found ${count} matches`));
+```
+
+---
+
+## Performance notes
+
+- `search` (non-ranked) uses direct dictionary lookups where possible and only scans keys for prefix/substring fallbacks when needed.
+- `search` (ranked) computes per-sentence scores based on token occurrences; this is efficient for moderate collections but will perform more work than non-ranked searches.
+- `suggest` uses binary search on a cached sorted key array — first call may pay the sort cost; subsequent calls are fast.
+- `merge` with deduplication does additional work to avoid duplicates; for very large datasets consider batching or incremental updates.
+
+---
+
+## Examples
+
+See the `examples/` folder for small runnable snippets demonstrating initialization, searching, suggestions, merging and tokenization options.
+
+---
+
+## Contributing
+
+Contributions welcome — open an issue or submit a pull request.
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
